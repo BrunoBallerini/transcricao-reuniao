@@ -21,6 +21,7 @@ import numpy as np
 from .ao_vivo import TranscritorAoVivo
 from .falantes import Vozes
 from .gravador import Gravador
+from .importar import EXTENSOES, importar, pasta_da_gravacao
 from .transcritor import MODELOS, hora, remover_eco, salvar, transcrever
 
 PASTA_BASE = Path(os.environ.get("TRANSCRICAO_PASTA", Path.home() / "Transcricoes"))
@@ -44,6 +45,7 @@ class App:
         self.arquivo: Path | None = None
         self.segmentos = []
         self._inicio = 0.0
+        self._ultima_pasta: Path | None = None
 
         raiz.title("Transcrição de reunião")
         raiz.geometry("820x600")
@@ -55,7 +57,7 @@ class App:
         self.b_gravar = ttk.Button(botoes, text="● Gravar", command=self.gravar)
         self.b_parar = ttk.Button(botoes, text="■ Parar", command=self.parar, state="disabled")
         self.b_abrir = ttk.Button(botoes, text="Abrir pasta", command=self.abrir_pasta)
-        self.b_anterior = ttk.Button(botoes, text="Transcrever gravação anterior...", command=self.transcrever_anterior)
+        self.b_anterior = ttk.Button(botoes, text="Transcrever arquivo de áudio...", command=self.transcrever_arquivo)
         self.b_nomear = ttk.Button(botoes, text="Nomear falantes...", command=self.nomear, state="disabled")
         for b in (self.b_gravar, self.b_parar, self.b_abrir, self.b_anterior, self.b_nomear):
             b.pack(side="left", padx=(0, 6))
@@ -240,25 +242,38 @@ class App:
             evento("falha", f"Falha ao finalizar: {erro}")
             evento("fim", None)
 
-    def transcrever_anterior(self):
-        escolhida = filedialog.askdirectory(initialdir=PASTA_BASE if PASTA_BASE.exists() else Path.home(),
-                                            title="Pasta de uma gravação")
-        if not escolhida:
+    def transcrever_arquivo(self):
+        """Transcreve uma gravação do app ou qualquer arquivo de áudio ou vídeo."""
+        escolhido = filedialog.askopenfilename(
+            initialdir=self._ultima_pasta or (PASTA_BASE if PASTA_BASE.exists() else Path.home()),
+            title="Arquivo de áudio ou vídeo",
+            filetypes=[("Áudio e vídeo", EXTENSOES), ("Todos os arquivos", "*.*")])
+        if not escolhido:
             return
-        pasta = Path(escolhida)
-        if not (pasta / "meta.json").exists():
-            messagebox.showerror("Falha", "A pasta não tem meta.json. Escolha uma pasta criada pelo app.")
-            return
+        arquivo = Path(escolhido)
+        self._ultima_pasta = arquivo.parent
+        pasta = pasta_da_gravacao(arquivo)
         self.pasta = pasta
+        self.arquivo = None
+        self.segmentos = []
+        self._mostrar(self.segmentos)
         self.ocupado = True
         self._botoes(gravando=False)
         self.progresso["value"] = 0
-        modelo, pessoas = self.modelo_revisao.get(), self._pessoas()
-        base = "transcricao_revisada" if (pasta / "transcricao.md").exists() else "transcricao"
+        modelo = self.modelo_revisao.get()
+        # Arquivo de fora vira uma faixa só, com todas as pessoas da reunião nela.
+        pessoas = self._pessoas() if pasta else {"mic": self.na_sala.get() + self.no_teams.get()}
 
         def tarefa():
+            nonlocal pasta
             evento = lambda tipo, valor: self.eventos.put((tipo, valor))
             try:
+                if pasta is None:
+                    evento("status", f"Convertendo {arquivo.name} para 16 kHz...")
+                    pasta = importar(arquivo, PASTA_BASE, progresso=lambda f: evento("progresso", f))
+                    self.pasta = pasta
+                    evento("progresso", 0)
+                base = "transcricao_revisada" if (pasta / "transcricao.md").exists() else "transcricao"
                 segmentos = self._revisar(pasta, modelo, pessoas, evento)
                 evento("transcricao", segmentos)
                 evento("fim", salvar(pasta, segmentos, base=base, titulo=TITULOS[base]))

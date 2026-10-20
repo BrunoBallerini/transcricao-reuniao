@@ -71,8 +71,13 @@ Cada gravação cria `%USERPROFILE%\Transcricoes\AAAA-MM-DD_HH-MM-SS\` com:
 
 A variável de ambiente `TRANSCRICAO_PASTA` troca a pasta base.
 
-"Transcrever gravação anterior..." roda o modelo de revisão sobre uma pasta já gravada. Use quando o app
-fechou no meio da reunião: o áudio fica salvo.
+"Transcrever arquivo de áudio..." roda o modelo de revisão sobre um arquivo escolhido:
+
+- Uma faixa (`mic.wav`, `sistema.wav`) ou o `meta.json` de uma pasta do app: revisa a gravação dessa
+  pasta. Use quando o app fechou no meio da reunião: o áudio fica salvo.
+- Qualquer outro áudio ou vídeo (mp3, m4a, mp4, ogg, webm, wav e outros): o app converte para `mic.wav`
+  mono em 16 kHz numa pasta nova e transcreve. A separação de falantes usa a soma dos dois campos de
+  pessoas.
 
 ## Modelos
 

@@ -1,5 +1,6 @@
 """Captura do microfone e do áudio do sistema (WASAPI loopback) em duas faixas WAV."""
 
+import ctypes
 import json
 import threading
 import time
@@ -8,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import soundcard as sc
 import soundfile as sf
 
 TAXA = 16000
@@ -18,10 +18,29 @@ FAIXAS = {"mic": "Você", "sistema": "Outros"}
 
 
 def dispositivos():
-    mic = sc.default_microphone()
-    alto_falante = sc.default_speaker()
-    loopback = sc.get_microphone(id=str(alto_falante.name), include_loopback=True)
-    return {"mic": mic, "sistema": loopback}
+    """Abre os dispositivos numa thread à parte.
+
+    O import do soundcard põe a thread em COM MTA, e o diálogo de arquivo do Windows trava numa thread
+    MTA. Fora da thread da janela, o diálogo segue abrindo depois de gravar.
+    """
+    resultado: dict = {}
+
+    def abrir():
+        try:
+            import soundcard as sc
+
+            alto_falante = sc.default_speaker()
+            resultado["mic"] = sc.default_microphone()
+            resultado["sistema"] = sc.get_microphone(id=str(alto_falante.name), include_loopback=True)
+        except Exception as erro:
+            resultado["erro"] = erro
+
+    t = threading.Thread(target=abrir, daemon=True)
+    t.start()
+    t.join()
+    if "erro" in resultado:
+        raise resultado["erro"]
+    return resultado
 
 
 class Gravador:
@@ -48,6 +67,8 @@ class Gravador:
 
     def _gravar(self, nome, dispositivo):
         caminho = self.pasta / f"{nome}.wav"
+        # A thread que importou o soundcard já terminou; sem COM nesta thread, o soundcard falha com 0x800401f0.
+        ctypes.windll.ole32.CoInitializeEx(None, 0)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -65,6 +86,8 @@ class Gravador:
                             self.ao_receber(nome, dados)
         except Exception as erro:
             self.falhas[nome] = str(erro)
+        finally:
+            ctypes.windll.ole32.CoUninitialize()
 
     def _salvar_meta(self):
         meta = {
